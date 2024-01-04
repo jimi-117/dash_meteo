@@ -1,20 +1,23 @@
+import os
 import requests
 import dash
 from dash import dcc, html
 import plotly.graph_objs as go
 from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
+import numpy as np
 import pandas as pd
 from datetime import datetime
 from dotenv import load_dotenv
 
 load_dotenv()
-
+# geonames usename
+geonames_user = os.getenv('geonames_api_username')
 
 # Fonction to get name list of towns from GeoNames API
 def fetch_town_list(query):
     # GeoNames user name
-    username = 'shom'
+    username = geonames_user
     # GeoNames API URL
     geonames_api_url = f'http://api.geonames.org/searchJSON?name_startsWith={query}&country=FR&maxRows=10&username={username}'
     response = requests.get(geonames_api_url)
@@ -37,16 +40,26 @@ app.layout = html.Div([
         placeholder="Enter your town...",
         search_value='',  # suggestions
         multi=False  # Mono-choice
+    ),
+    dcc.Dropdown(
+        id='birth-year-dropdown',
+        options=years,
+        placeholder="Select your birthyear..."
     )
 ])
 
 
 @app.callback(
-    Output('temperature-graph', 'figure'),
-    [Input('submit-button', 'n_clicks')],
-    [dash.dependencies.State('input-region', 'value'),
-     dash.dependencies.State('input-birthday', 'value')]
+    Output('town-name-input', 'options'),
+    [Input('town-name-input', 'search_value')]
 )
+
+def update_town_list(search_value):
+    if not search_value:
+        raise PreventUpdate
+    return fetch_town_list(search_value)
+
+
 def update_graph(n_clicks, input_region, input_birthday):
     if n_clicks > 0 and input_region and input_birthday:
         # 地点を特定し、気温データを取得するロジック
