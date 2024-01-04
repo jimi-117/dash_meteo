@@ -1,32 +1,43 @@
-
+import requests
 import dash
 from dash import dcc, html
 import plotly.graph_objs as go
-from dash.dependencies import Input, Output
+from dash.dependencies import Input, Output, State
+from dash.exceptions import PreventUpdate
 import pandas as pd
 from datetime import datetime
+from dotenv import load_dotenv
 
-# download meteo data
-def download_weather_data(dataset_url):
-    # 
-    pass
+load_dotenv()
+
+
+# Fonction to get name list of towns from GeoNames API
+def fetch_town_list(query):
+    # GeoNames user name
+    username = 'shom'
+    # GeoNames API URL
+    geonames_api_url = f'http://api.geonames.org/searchJSON?name_startsWith={query}&country=FR&maxRows=10&username={username}'
+    response = requests.get(geonames_api_url)
+    if response.status_code == 200:
+        towns = response.json()['geonames']
+        return [{'label': town['name'], 'value': town['name']} for town in towns]
+    else:
+        return []
+    
+# Pulldown list for birthyear
+years = [{'label': str(year), 'value': year} for year in range(1900, 2022)]
 
 # Init dash
 app = dash.Dash(__name__)
 
 # app layouts
 app.layout = html.Div([
-    html.Div([
-        html.Label('Enter town:'),
-        dcc.Input(id='input-region', value='', type='text'),
-
-        html.Label('Enter your birthday:'),
-        dcc.DatePickerSingle(id='input-birthday'),
-
-        html.Button(id='submit-button', n_clicks=0, children='show')
-    ]),
-
-    dcc.Graph(id='temperature-graph')
+    dcc.Dropdown(
+        id='town-name-input',
+        placeholder="Enter your town...",
+        search_value='',  # suggestions
+        multi=False  # Mono-choice
+    )
 ])
 
 
