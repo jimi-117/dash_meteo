@@ -8,7 +8,7 @@ from datetime import datetime
 
 # download meteo data
 def download_weather_data(dataset_url):
-    # 実際のデータ取得ロジックをここに記述
+    # 
     pass
 
 # Init dash
