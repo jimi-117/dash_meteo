@@ -2,97 +2,95 @@ import os
 import requests
 import dash
 from dash import dcc, html
-import plotly.graph_objs as go
-from dash.dependencies import Input, Output, State
+from dash.dependencies import Input, Output
 from dash.exceptions import PreventUpdate
 import numpy as np
 import pandas as pd
-from datetime import datetime
-from dotenv import load_dotenv
-import io
 import gzip
+import io
+from dotenv import load_dotenv
+
+import plotly.express as px
 
 load_dotenv()
 
-# geonames username
-geonames_user = os.getenv('geonames_api_username')
+# global configs
+GEONAMES_USER = os.getenv('geonames_api_username')
+EARTH_RADIUS = 6371  # radius (km)
 
-# Function to fetch the list of towns from the GeoNames API
-def fetch_town_list(query):
-    username = geonames_user
-    geonames_api_url = f'http://api.geonames.org/searchJSON?name_startsWith={query}&country=FR&maxRows=10&username={username}'
-    response = requests.get(geonames_api_url)
+# pipeline
+def get_geonames_api_url(api_name, town_name='', query='', country='FR', max_rows=10):
+    return f'http://api.geonames.org/{api_name}JSON?name_startsWith={query}&placename={town_name}&country={country}&maxRows={max_rows}&username={GEONAMES_USER}'
+
+def make_request(url):
+    response = requests.get(url)
     if response.status_code == 200:
-        towns = response.json()['geonames']
-        return [{'label': town['name'], 'value': town['name']} for town in towns]
+        return response.json()
     else:
-        return []
+        return None
 
-# Function to fetch the first two digits of the postal code, and latitude and longitude
+def fetch_town_list(query):
+    url = get_geonames_api_url('search', query=query)
+    json_response = make_request(url)
+    if json_response:
+        towns = json_response['geonames']
+        return [{'label': town['name'], 'value': town['name']} for town in towns]
+    return []
+
 def fetch_postal_code_and_coords(town_name):
-    username = geonames_user
-    # Note: Setting maxRows to 1 to get only the first result
-    geonames_api_url = f'http://api.geonames.org/postalCodeSearchJSON?placename={town_name}&country=FR&maxRows=1&username={username}'
-    response = requests.get(geonames_api_url)
-    if response.status_code == 200:
-        postal_codes = response.json()['postalCodes']
-        if postal_codes:
-            postal_code_info = postal_codes[0]
-            # Extracting the first two digits of the postal code
-            postal_code_prefix = postal_code_info['postalCode'][:2]
-            # Getting latitude and longitude
-            latitude = postal_code_info['lat']
-            longitude = postal_code_info['lng']
-            return postal_code_prefix, latitude, longitude
+    url = get_geonames_api_url('postalCodeSearch', town_name=town_name, max_rows=1)
+    json_response = make_request(url)
+    if json_response and json_response['postalCodes']:
+        postal_code_info = json_response['postalCodes'][0]
+        postal_code_prefix = postal_code_info['postalCode'][:2]
+        latitude, longitude = postal_code_info['lat'], postal_code_info['lng']
+        return postal_code_prefix, latitude, longitude
     return None, None, None
 
-# The radius of the Earth in kilometers
-EARTH_RADIUS = 6371
-# Define the Haversine formula to calculate distance between two latitude-longitude points
 def haversine(lat1, lon1, lat2, lon2):
-    # Convert latitude and longitude from degrees to radians
     lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
-
-    # Difference in coordinates
     dlat = lat2 - lat1
     dlon = lon2 - lon1
-
-    # Haversine formula
     a = np.sin(dlat / 2.0) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2.0) ** 2
     c = 2 * np.arcsin(np.sqrt(a))
-    km = EARTH_RADIUS * c
-    return km
+    return EARTH_RADIUS * c
 
-# Function to find the nearest weather station to a given latitude and longitude
+# to make a func. to take 2nd nearest station to fill the month which contains null TX value.
+
 def find_nearest_station(df, lat, lon):
-    # Apply the Haversine function to calculate distances to each station in the DataFrame
     distances = df.apply(lambda row: haversine(lat, lon, row['LAT'], row['LON']), axis=1)
-    # Find the index of the smallest distance
-    nearest_station = df.loc[distances.idxmin(), 'NUM_POSTE']
-    return nearest_station
+    return df.loc[distances.idxmin(), 'NUM_POSTE']
+
+def download_temperatures(postal_code_prefix):
+    url = f"https://object.files.data.gouv.fr/meteofrance/data/synchro_ftp/BASE/MENS/MENSQ_{postal_code_prefix}_previous-1950-2021.csv.gz"
+    response = make_request(url)
+    if response:
+        gzip_file = gzip.GzipFile(fileobj=io.BytesIO(response.content))
+        df = pd.read_csv(gzip_file, delimiter=';')
+        return df[['NUM_POSTE', 'AAAAMM', 'LAT', 'LON', 'TX']]
+    return None
+
+fig = px.line()
 
 
-
-# Dropdown list for birthyear
-years = [{'label': str(year), 'value': year} for year in range(1900, 2022)]
-
-# Initialize Dash
+# init Dash
 app = dash.Dash(__name__)
 
-# App layout
-app.layout = html.Div([
+app.layout = html.Div(children=[
+    html.H1(children='Degemer Mat !'),
+    
     dcc.Dropdown(
         id='town-name-input',
         placeholder="Enter your town...",
-        search_value='',  # suggestions
-        multi=False  # Mono-choice
+        search_value='',
+        multi=False
     ),
     dcc.Dropdown(
         id='birth-year-dropdown',
-        options=years,
+        options=[{'label': str(year), 'value': year} for year in range(1900, 2022)],
         placeholder="Select your birthyear..."
     ),
-    # You might want to add here other elements to display the fetched data
+    dcc.Graph(id='temperature-graph')
 ])
 
 @app.callback(
@@ -104,9 +102,8 @@ def update_town_list(search_value):
         raise PreventUpdate
     return fetch_town_list(search_value)
 
-# Presumably you'll have another callback here to update the graph
+# may others callbacks...
 # ...
 
 if __name__ == '__main__':
     app.run_server(debug=True)
-
